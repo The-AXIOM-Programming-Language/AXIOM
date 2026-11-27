@@ -307,7 +307,7 @@ mod tests {
     fn treats_edf_plus_annotation_channels_as_tal_containers() {
         let mut bytes = fixture("EDF+C");
         bytes[256..272].fill(b' ');
-        bytes[256..270].copy_from_slice(b"EDF Annotations");
+        bytes[256..271].copy_from_slice(b"EDF Annotations");
         // Physical minimum and maximum columns for the first signal.
         bytes[464..472].copy_from_slice(b"0       ");
         bytes[480..488].copy_from_slice(b"0       ");
