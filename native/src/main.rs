@@ -95,6 +95,17 @@ impl Parser {
             _ => return Err("Expected an expression".into()),
         };
         loop {
+            // Scientific literals permit a space between a magnitude and unit:
+            // "20 ms" is parsed as the multiplication 20 * ms.
+            if let Token::Ident(name) = self.current() {
+                if unit_scale(name).is_some() {
+                    if 3 < min_bp { break; }
+                    let unit_name = name.clone();
+                    self.advance();
+                    lhs = Expr::Binary(Box::new(lhs), '*', Box::new(Expr::Name(unit_name)));
+                    continue;
+                }
+            }
             let (op, left_bp, right_bp) = match self.current() {
                 Token::Plus => ('+', 1, 2), Token::Minus => ('-', 1, 2),
                 Token::Star => ('*', 3, 4), Token::Slash => ('/', 3, 4),
