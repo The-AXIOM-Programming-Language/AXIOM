@@ -1,0 +1,5 @@
+# A first program in native AXIOM
+let duration = 20 ms
+let doubled = duration * 2
+show "AXIOM is running"
+show doubled
