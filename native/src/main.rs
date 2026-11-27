@@ -1,3 +1,5 @@
+pub mod eeg;
+
 use std::{env, fs, process};
 
 #[derive(Debug, Clone, PartialEq)]
