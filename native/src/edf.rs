@@ -245,7 +245,7 @@ mod tests {
         field(&mut out, "test recording", 80);
         field(&mut out, "01.01.24", 8);
         field(&mut out, "12.00.00", 8);
-        field(&mut out, "512", 8);
+        field(&mut out, "768", 8);
         field(&mut out, reserved, 44);
         field(&mut out, "2", 8);
         field(&mut out, "1", 8);
