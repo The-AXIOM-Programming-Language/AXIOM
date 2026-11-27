@@ -1,0 +1,12 @@
+[package]
+name = "axiom"
+version = "0.2.0"
+edition = "2021"
+description = "The native AXIOM programming language toolchain"
+license = "MIT"
+
+[[bin]]
+name = "axiom"
+path = "src/main.rs"
+
+[dependencies]
