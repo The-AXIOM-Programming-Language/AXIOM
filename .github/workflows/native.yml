@@ -1,0 +1,28 @@
+name: Native AXIOM
+
+on:
+  push:
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  pull_request:
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run native compiler tests
+        working-directory: native
+        run: cargo test --locked
+      - name: Build release executable
+        working-directory: native
+        run: cargo build --release --locked
+      - name: Run example program
+        working-directory: native
+        run: cargo run --locked -- run examples/hello.ax
