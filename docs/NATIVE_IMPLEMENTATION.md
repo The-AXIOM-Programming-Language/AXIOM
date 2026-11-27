@@ -38,7 +38,7 @@ This is the initial native implementation, not feature parity with the former Py
 1. Stabilize the lexical and syntactic grammar.
 2. Add source spans and structured diagnostics.
 3. Add a typed value system with dimensional quantities.
-4. Lower the AST into AXIOM bytecode / an intermediate representation.
+4. Lower the AST into a typed AXIOM intermediate representation and bytecode.
 5. Implement a deterministic virtual machine.
 6. Port the LIF model, stimuli, solvers, and recording into the native runtime.
-7. Add native compilation as a later backend, with reproducible numerical regression tests.
+7. Add an optional native machine-code backend after the language semantics and VM are stable, with reproducible numerical regression tests.
