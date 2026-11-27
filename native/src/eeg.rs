@@ -44,7 +44,7 @@ impl Electrode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EegChannel {
     pub label: String,
     pub unit: VoltageUnit,
