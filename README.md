@@ -10,7 +10,7 @@ The former Python prototype remains in the repository as historical/reference im
 
 ## Native toolchain
 
-The compiler and command-line tool are implemented in Rust.
+The language front end and command-line interpreter are implemented in Rust. This first milestone executes parsed AXIOM programs directly; machine-code generation is a later milestone.
 
 ### Requirements
 
@@ -53,11 +53,11 @@ AXIOM is intended to grow into a typed scientific language with:
 
 - A formally specified grammar and source-aware diagnostics.
 - Dimensional quantities and compile-time unit checking.
-- A typed intermediate representation and deterministic runtime.
+- A typed intermediate representation, bytecode compiler, and deterministic runtime.
 - Scientific numerical solvers and reproducible simulation.
 - Neuroscience primitives, beginning with leaky integrate-and-fire models.
 - Stimulus definitions, recording, and structured data export.
-- A stable CLI, package/build workflow, and native compilation backend.
+- A stable CLI, package/build workflow, and optional native machine-code backend.
 
 These are roadmap goals, not claims about features already implemented. See [the native implementation notes](docs/NATIVE_IMPLEMENTATION.md) for the current implementation boundary.
 
