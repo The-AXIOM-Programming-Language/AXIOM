@@ -36,6 +36,13 @@ pub struct EdfHeader {
     pub plus_mode: EdfPlusMode,
 }
 
+impl EdfSignalHeader {
+    /// EDF+ annotation channels carry TAL bytes, not calibrated EEG samples.
+    pub fn is_annotation_channel(&self) -> bool {
+        self.label.trim() == "EDF Annotations"
+    }
+}
+
 impl EdfHeader {
     /// Parse only the EDF fixed and per-signal header. The input may contain
     /// additional bytes after the header; those bytes are not decoded here.
@@ -85,7 +92,10 @@ impl EdfHeader {
             let digital_minimum = parse_i32(&digital_minima[i], "digital minimum")?;
             let digital_maximum = parse_i32(&digital_maxima[i], "digital maximum")?;
             let samples_per_record = parse_usize(&samples[i], "samples per record")?;
-            if physical_minimum >= physical_maximum {
+            let is_annotation_channel = labels[i].trim() == "EDF Annotations";
+            // EDF+ annotation channels are byte containers, not calibrated
+            // physical signals; their physical range may legitimately be 0..0.
+            if !is_annotation_channel && physical_minimum >= physical_maximum {
                 return Err(EdfError::InvalidPhysicalRange { signal_index: i });
             }
             if digital_minimum >= digital_maximum {
@@ -134,8 +144,12 @@ impl EdfHeader {
     }
 
     pub fn sampling_rate_hz(&self, signal_index: usize) -> Option<f64> {
-        self.signals.get(signal_index).map(|signal| {
-            signal.samples_per_record as f64 / self.data_record_duration_seconds
+        self.signals.get(signal_index).and_then(|signal| {
+            if signal.is_annotation_channel() {
+                None
+            } else {
+                Some(signal.samples_per_record as f64 / self.data_record_duration_seconds)
+            }
         })
     }
 }
@@ -286,6 +300,21 @@ mod tests {
     fn recognizes_edf_plus_continuous_recordings() {
         let header = EdfHeader::parse(&fixture("EDF+C")).unwrap();
         assert_eq!(header.plus_mode, EdfPlusMode::Continuous);
+    }
+
+
+    #[test]
+    fn treats_edf_plus_annotation_channels_as_tal_containers() {
+        let mut bytes = fixture("EDF+C");
+        bytes[256..272].fill(b' ');
+        bytes[256..270].copy_from_slice(b"EDF Annotations");
+        // Physical minimum and maximum columns for the first signal.
+        bytes[464..472].copy_from_slice(b"0       ");
+        bytes[480..488].copy_from_slice(b"0       ");
+        let header = EdfHeader::parse(&bytes).unwrap();
+        assert!(header.signals[0].is_annotation_channel());
+        assert_eq!(header.sampling_rate_hz(0), None);
+        assert_eq!(header.sampling_rate_hz(1), Some(128.0));
     }
 
     #[test]
