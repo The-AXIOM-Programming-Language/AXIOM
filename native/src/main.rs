@@ -1,4 +1,5 @@
 pub mod eeg;
+pub mod edf;
 
 use std::{env, fs, process};
 
