@@ -174,10 +174,15 @@ pub fn parse_tals(bytes: &[u8]) -> Result<Vec<Tal>, EdfDataError> {
             if cursor == bytes.len() {
                 return Err(EdfDataError::MalformedTal("TAL has no zero terminator".into()));
             }
-            let text = std::str::from_utf8(&bytes[text_start..cursor])
-                .map_err(|_| EdfDataError::InvalidAnnotationUtf8)?
-                .to_owned();
-            texts.push(text);
+            // A separator immediately followed by NUL terminates the text
+            // list; it is not an additional empty annotation field unless
+            // this is the first (timekeeping) text field.
+            if cursor > text_start || texts.is_empty() {
+                let text = std::str::from_utf8(&bytes[text_start..cursor])
+                    .map_err(|_| EdfDataError::InvalidAnnotationUtf8)?
+                    .to_owned();
+                texts.push(text);
+            }
             if bytes[cursor] == 0 {
                 cursor += 1;
                 break;
@@ -292,9 +297,9 @@ mod tests {
     fn preserves_annotation_signal_as_raw_bytes() {
         let h = header(vec![signal("EDF Annotations", 4, -1.0, 1.0)], Some(1));
         let mut bytes = vec![0; 256];
-        bytes.extend_from_slice(b"+0\x14\x14\0\0\0");
+        bytes.extend_from_slice(b"+0\x14\x14\0\0\0\0");
         let decoded = decode_data_records(&h, &bytes).unwrap();
-        assert_eq!(decoded.records[0].signals[0], EdfSignalRecord::AnnotationBytes(b"+0\x14\x14\0\0\0".to_vec()));
+        assert_eq!(decoded.records[0].signals[0], EdfSignalRecord::AnnotationBytes(b"+0\x14\x14\0\0\0\0".to_vec()));
     }
 
     #[test]
