@@ -1,4 +1,7 @@
 mod eeg;
+pub mod eeg;
+pub mod edf;
+pub mod edf_data;
 
 use std::{env, fs, process};
 
