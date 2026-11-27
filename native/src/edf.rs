@@ -94,9 +94,13 @@ impl EdfHeader {
             let samples_per_record = parse_usize(&samples[i], "samples per record")?;
             let is_annotation_channel = labels[i].trim() == "EDF Annotations";
             // EDF+ annotation channels are byte containers, not calibrated
-            // physical signals; their physical range may legitimately be 0..0.
-            if !is_annotation_channel && physical_minimum >= physical_maximum {
+            // physical signals, but the EDF+ header still requires distinct
+            // physical extrema for compatibility with the EDF header format.
+            if physical_minimum >= physical_maximum {
                 return Err(EdfError::InvalidPhysicalRange { signal_index: i });
+            }
+            if is_annotation_channel && (digital_minimum != -32768 || digital_maximum != 32767) {
+                return Err(EdfError::InvalidAnnotationDigitalRange { signal_index: i });
             }
             if digital_minimum >= digital_maximum {
                 return Err(EdfError::InvalidDigitalRange { signal_index: i });
@@ -217,6 +221,7 @@ pub enum EdfError {
     InvalidRecordDuration(f64),
     InvalidPhysicalRange { signal_index: usize },
     InvalidDigitalRange { signal_index: usize },
+    InvalidAnnotationDigitalRange { signal_index: usize },
     ZeroSamplesPerRecord { signal_index: usize },
     UnsupportedReservedField(String),
 }
@@ -235,6 +240,7 @@ impl std::fmt::Display for EdfError {
             Self::InvalidRecordDuration(value) => write!(f, "EDF data-record duration must be positive, got {value}"),
             Self::InvalidPhysicalRange { signal_index } => write!(f, "signal {signal_index} has an invalid physical calibration range"),
             Self::InvalidDigitalRange { signal_index } => write!(f, "signal {signal_index} has an invalid digital calibration range"),
+            Self::InvalidAnnotationDigitalRange { signal_index } => write!(f, "EDF+ annotation signal {signal_index} must use digital limits -32768..32767"),
             Self::ZeroSamplesPerRecord { signal_index } => write!(f, "signal {signal_index} declares zero samples per data record"),
             Self::UnsupportedReservedField(value) => write!(f, "unsupported EDF reserved field '{value}'"),
         }
@@ -308,9 +314,9 @@ mod tests {
         let mut bytes = fixture("EDF+C");
         bytes[256..272].fill(b' ');
         bytes[256..271].copy_from_slice(b"EDF Annotations");
-        // Physical minimum and maximum columns for the first signal.
-        bytes[464..472].copy_from_slice(b"0       ");
-        bytes[480..488].copy_from_slice(b"0       ");
+        // EDF+ annotation channels still require distinct physical extrema.
+        bytes[464..472].copy_from_slice(b"-1      ");
+        bytes[480..488].copy_from_slice(b"1       ");
         let header = EdfHeader::parse(&bytes).unwrap();
         assert!(header.signals[0].is_annotation_channel());
         assert_eq!(header.sampling_rate_hz(0), None);
