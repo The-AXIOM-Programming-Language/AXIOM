@@ -1,8 +1,10 @@
 pub mod eeg;
 pub mod edf;
 pub mod edf_data;
+pub mod units;
 
-use std::{env, fs, process};
+use std::{collections::HashMap, env, fs, process};
+use units::{Quantity, Unit, UnitError};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
@@ -27,6 +29,7 @@ fn lex(source: &str) -> Result<Vec<Token>, LexError> {
             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') { i += 1; }
             let raw: String = chars[start..i].iter().collect();
             let value = raw.parse::<f64>().map_err(|_| LexError { line, message: format!("Invalid number '{raw}'") })?;
+            if !value.is_finite() { return Err(LexError { line, message: "Numeric literal must be finite".into() }); }
             out.push(Token::Number(value)); continue;
         }
         if c == '"' {
@@ -52,7 +55,7 @@ fn lex(source: &str) -> Result<Vec<Token>, LexError> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Value { Number(f64), Text(String) }
+enum Value { Quantity(Quantity), Text(String) }
 
 #[derive(Debug, Clone)]
 enum Expr { Value(Value), Name(String), Unary(bool, Box<Expr>), Binary(Box<Expr>, char, Box<Expr>) }
@@ -90,7 +93,7 @@ impl Parser {
     fn expression(&mut self, min_bp: u8) -> Result<Expr, String> {
         let token = self.advance();
         let mut lhs = match token {
-            Token::Number(n) => Expr::Value(Value::Number(n)),
+            Token::Number(n) => Expr::Value(Value::Quantity(Quantity::scalar(n).map_err(|e| e.to_string())?)),
             Token::String(s) => Expr::Value(Value::Text(s)),
             Token::Ident(n) => Expr::Name(n),
             Token::Minus => Expr::Unary(true, Box::new(self.expression(9)?)),
@@ -99,10 +102,9 @@ impl Parser {
             _ => return Err("Expected an expression".into()),
         };
         loop {
-            // Scientific literals permit a space between a magnitude and unit:
-            // "20 ms" is parsed as the multiplication 20 * ms.
+            // A space between a magnitude and unit is part of AXIOM syntax: 20 ms.
             if let Token::Ident(name) = self.current() {
-                if unit_scale(name).is_some() {
+                if Unit::lookup(name).is_some() {
                     if 3 < min_bp { break; }
                     let unit_name = name.clone();
                     self.advance();
@@ -124,36 +126,42 @@ impl Parser {
     }
 }
 
-fn unit_scale(name: &str) -> Option<f64> {
-    Some(match name {
-        "ms" => 1.0, "s" => 1000.0, "us" => 0.001,
-        "mV" => 1.0, "V" => 1000.0,
-        "nA" => 1.0, "pA" => 0.001,
-        "MOhm" => 1.0, "nF" => 1.0, "Hz" => 1.0,
-        _ => return None,
-    })
+fn unit_value(name: &str) -> Option<Quantity> {
+    let unit = Unit::lookup(name)?;
+    Quantity::from_unit(1.0, unit).ok()
 }
-fn eval(expr: &Expr, vars: &std::collections::HashMap<String, Value>) -> Result<Value, String> {
+
+fn arithmetic_error(error: UnitError) -> String { error.to_string() }
+
+fn eval(expr: &Expr, vars: &HashMap<String, Value>) -> Result<Value, String> {
     match expr {
         Expr::Value(v) => Ok(v.clone()),
         Expr::Name(n) => {
             if let Some(v) = vars.get(n) { return Ok(v.clone()); }
-            if let Some(scale) = unit_scale(n) { return Ok(Value::Number(scale)); }
+            if let Some(quantity) = unit_value(n) { return Ok(Value::Quantity(quantity)); }
             Err(format!("Unknown name '{n}'"))
         }
         Expr::Unary(negative, e) => match eval(e, vars)? {
-            Value::Number(n) => Ok(Value::Number(if *negative { -n } else { n })),
-            _ => Err("Unary arithmetic requires a number".into()),
+            Value::Quantity(q) => {
+                let magnitude = if *negative { -q.magnitude } else { q.magnitude };
+                Ok(Value::Quantity(Quantity::new(magnitude, q.dimension).map_err(arithmetic_error)?))
+            }
+            Value::Text(_) => Err("Unary arithmetic requires a number or quantity".into()),
         },
         Expr::Binary(a, op, b) => {
             let left = eval(a, vars)?; let right = eval(b, vars)?;
             match (left, right) {
-                (Value::Number(x), Value::Number(y)) => {
-                    let result = match op { '+' => x+y, '-' => x-y, '*' => x*y, '/' if y != 0.0 => x/y, '/' => return Err("Division by zero".into()), _ => unreachable!() };
-                    if !result.is_finite() { return Err("Arithmetic produced a non-finite number".into()); }
-                    Ok(Value::Number(result))
+                (Value::Quantity(x), Value::Quantity(y)) => {
+                    let result = match op {
+                        '+' => x.add(y),
+                        '-' => x.sub(y),
+                        '*' => x.mul(y),
+                        '/' => x.div(y),
+                        _ => unreachable!(),
+                    }.map_err(arithmetic_error)?;
+                    Ok(Value::Quantity(result))
                 }
-                _ => Err("This operator requires numeric operands".into()),
+                _ => Err("This operator requires numeric or quantity operands".into()),
             }
         }
     }
@@ -163,7 +171,7 @@ fn execute(source: &str) -> Result<Vec<String>, String> {
     let tokens = lex(source).map_err(|e| format!("Line {}: {}", e.line, e.message))?;
     let mut parser = Parser { tokens, pos: 0 };
     let statements = parser.parse()?;
-    let mut vars = std::collections::HashMap::new();
+    let mut vars = HashMap::new();
     let mut output = Vec::new();
     for stmt in statements {
         match stmt {
@@ -173,7 +181,8 @@ fn execute(source: &str) -> Result<Vec<String>, String> {
                 vars.insert(name, value);
             }
             Stmt::Show(expr) => output.push(match eval(&expr, &vars)? {
-                Value::Number(n) => n.to_string(), Value::Text(s) => s,
+                Value::Quantity(q) => q.magnitude.to_string(),
+                Value::Text(s) => s,
             }),
         }
     }
@@ -221,6 +230,13 @@ mod tests {
         assert!(execute("show missing").unwrap_err().contains("Unknown name"));
     }
     #[test] fn rejects_division_by_zero() {
-        assert!(execute("show 1 / 0").unwrap_err().contains("Division by zero"));
+        assert!(execute("show 1 / 0").unwrap_err().contains("division by zero"));
+    }
+    #[test] fn rejects_adding_time_to_voltage() {
+        let error = execute("show 2 ms + 3 mV").unwrap_err();
+        assert!(error.contains("incompatible dimensions"));
+    }
+    #[test] fn permits_ohms_times_current_to_produce_voltage() {
+        assert_eq!(execute("show 10 MOhm * 2 nA").unwrap(), vec!["20"]);
     }
 }
