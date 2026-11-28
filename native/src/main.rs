@@ -2,6 +2,7 @@ pub mod eeg;
 pub mod edf;
 pub mod edf_data;
 pub mod units;
+pub mod simulation;
 
 use std::{collections::HashMap, env, fs, process};
 use units::{Quantity, Unit, UnitError};
