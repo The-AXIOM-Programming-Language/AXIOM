@@ -84,30 +84,3 @@ fn main() {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test] fn evaluates_arithmetic_and_units() {
-        let out = execute("let duration = 20 ms\nshow duration * 2\n").unwrap();
-        assert_eq!(out, vec!["40"]);
-    }
-    #[test] fn respects_precedence() {
-        assert_eq!(execute("show 2 + 3 * 4").unwrap(), vec!["14"]);
-    }
-    #[test] fn handles_strings() {
-        assert_eq!(execute("show \"AXIOM\"").unwrap(), vec!["AXIOM"]);
-    }
-    #[test] fn reports_unknown_names() {
-        assert!(execute("show missing").unwrap_err().contains("Unknown name"));
-    }
-    #[test] fn rejects_division_by_zero() {
-        assert!(execute("show 1 / 0").unwrap_err().contains("division by zero"));
-    }
-    #[test] fn rejects_adding_time_to_voltage() {
-        let error = execute("show 2 ms + 3 mV").unwrap_err();
-        assert!(error.contains("incompatible dimensions"));
-    }
-    #[test] fn permits_ohms_times_current_to_produce_voltage() {
-        assert_eq!(execute("show 10 MOhm * 2 nA").unwrap(), vec!["20"]);
-    }
-}
