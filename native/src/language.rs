@@ -26,24 +26,125 @@ impl std::error::Error for RuntimeError {}
 #[derive(Debug, Clone)]
 enum Value { Number(f64), Quantity(Quantity), Text(String), NumberList(Vec<f64>) }
 
-fn eval_atom(expr: &str, vars: &HashMap<String, Value>, line: usize) -> Result<Value, RuntimeError> {
-    let e = expr.trim();
-    if e.is_empty() { return Err(RuntimeError::new(line, "expected an expression")); }
-    if (e.starts_with('"') && e.ends_with('"')) || (e.starts_with('\'') && e.ends_with('\'')) {
-        return Ok(Value::Text(e[1..e.len()-1].to_string()));
-    }
-    if let Some(v) = vars.get(e) { return Ok(v.clone()); }
-    let pieces: Vec<&str> = e.split_whitespace().collect();
-    if pieces.len() == 2 {
-        if let (Ok(n), Some(unit)) = (pieces[0].parse::<f64>(), Unit::lookup(pieces[1])) {
-            return Quantity::from_unit(n, unit).map(Value::Quantity)
-                .map_err(|err| RuntimeError::new(line, err.to_string()));
+#[derive(Debug, Clone, PartialEq)]
+enum ExprToken { Number(f64), Ident(String), Text(String), Plus, Minus, Star, Slash, Left, Right, End }
+
+fn expression_tokens(source: &str, line: usize) -> Result<Vec<ExprToken>, RuntimeError> {
+    let chars: Vec<char> = source.chars().collect();
+    let mut i = 0;
+    let mut tokens = Vec::new();
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch.is_whitespace() { i += 1; continue; }
+        if ch.is_ascii_digit() || (ch == '.' && i + 1 < chars.len() && chars[i+1].is_ascii_digit()) {
+            let begin = i; i += 1;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') { i += 1; }
+            let raw: String = chars[begin..i].iter().collect();
+            let n = raw.parse::<f64>().map_err(|_| RuntimeError::new(line, format!("invalid number '{raw}'")))?;
+            if !n.is_finite() { return Err(RuntimeError::new(line, "numeric literals must be finite")); }
+            tokens.push(ExprToken::Number(n)); continue;
         }
+        if ch == '"' || ch == '\'' {
+            let quote = ch; i += 1; let begin = i;
+            while i < chars.len() && chars[i] != quote { i += 1; }
+            if i == chars.len() { return Err(RuntimeError::new(line, "unterminated string literal")); }
+            tokens.push(ExprToken::Text(chars[begin..i].iter().collect())); i += 1; continue;
+        }
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let begin = i; i += 1;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') { i += 1; }
+            tokens.push(ExprToken::Ident(chars[begin..i].iter().collect())); continue;
+        }
+        tokens.push(match ch {
+            '+' => ExprToken::Plus, '-' => ExprToken::Minus, '*' => ExprToken::Star,
+            '/' => ExprToken::Slash, '(' => ExprToken::Left, ')' => ExprToken::Right,
+            _ => return Err(RuntimeError::new(line, format!("unexpected character '{ch}' in expression"))),
+        });
+        i += 1;
     }
-    if let Ok(n) = e.parse::<f64>() {
-        return Ok(Value::Number(n));
+    tokens.push(ExprToken::End);
+    Ok(tokens)
+}
+
+struct ExpressionParser<'a> {
+    tokens: Vec<ExprToken>,
+    position: usize,
+    variables: &'a HashMap<String, Value>,
+    line: usize,
+}
+impl<'a> ExpressionParser<'a> {
+    fn current(&self) -> &ExprToken { &self.tokens[self.position] }
+    fn advance(&mut self) -> ExprToken { let t = self.tokens[self.position].clone(); self.position += 1; t }
+    fn parse(&mut self) -> Result<Value, RuntimeError> {
+        let value = self.expression(0)?;
+        if *self.current() != ExprToken::End {
+            return Err(RuntimeError::new(self.line, "unexpected token after expression"));
+        }
+        Ok(value)
     }
-    Err(RuntimeError::new(line, format!("unsupported expression '{e}' (expected a number, quantity, string, or variable)")))
+    fn expression(&mut self, min_bp: u8) -> Result<Value, RuntimeError> {
+        let token = self.advance();
+        let mut lhs = match token {
+            ExprToken::Number(n) => Value::Number(n),
+            ExprToken::Text(s) => Value::Text(s),
+            ExprToken::Ident(name) => {
+                if let Some(value) = self.variables.get(&name) { value.clone() }
+                else if let Some(unit) = Unit::lookup(&name) {
+                    Value::Quantity(Quantity::from_unit(1.0, unit).map_err(|e| RuntimeError::new(self.line, e.to_string()))?)
+                } else { return Err(RuntimeError::new(self.line, format!("unknown variable or unit '{name}'"))); }
+            }
+            ExprToken::Minus => match self.expression(9)? {
+                Value::Number(n) => Value::Number(-n),
+                Value::Quantity(q) => Value::Quantity(Quantity::new(-q.magnitude, q.dimension).map_err(|e| RuntimeError::new(self.line, e.to_string()))?),
+                _ => return Err(RuntimeError::new(self.line, "unary minus requires a number or quantity")),
+            },
+            ExprToken::Plus => self.expression(9)?,
+            ExprToken::Left => {
+                let value = self.expression(0)?;
+                if self.advance() != ExprToken::Right { return Err(RuntimeError::new(self.line, "expected ')'")); }
+                value
+            }
+            _ => return Err(RuntimeError::new(self.line, "expected an expression")),
+        };
+        loop {
+            // AXIOM permits magnitude-unit adjacency: 20 ms means 20 * ms.
+            let implicit_unit = matches!(self.current(), ExprToken::Ident(name) if Unit::lookup(name).is_some());
+            let (op, left_bp, right_bp) = if implicit_unit { ('*', 3, 4) } else {
+                match self.current() {
+                    ExprToken::Plus => ('+', 1, 2), ExprToken::Minus => ('-', 1, 2),
+                    ExprToken::Star => ('*', 3, 4), ExprToken::Slash => ('/', 3, 4),
+                    _ => break,
+                }
+            };
+            if left_bp < min_bp { break; }
+            if !implicit_unit { self.advance(); }
+            let rhs = self.expression(right_bp)?;
+            lhs = match (lhs, rhs) {
+                (Value::Number(a), Value::Number(b)) => Value::Number(match op {
+                    '+' => a+b, '-' => a-b, '*' => a*b, '/' if b != 0.0 => a/b,
+                    '/' => return Err(RuntimeError::new(self.line, "division by zero")),
+                    _ => unreachable!(),
+                }),
+                (Value::Quantity(a), Value::Quantity(b)) => {
+                    let q = match op { '+' => a.add(b), '-' => a.sub(b), '*' => a.mul(b), '/' => a.div(b), _ => unreachable!() }
+                        .map_err(|e| RuntimeError::new(self.line, e.to_string()))?;
+                    Value::Quantity(q)
+                }
+                (Value::Quantity(a), Value::Number(b)) if op == '*' || op == '/' => {
+                    if op == '/' && b == 0.0 { return Err(RuntimeError::new(self.line, "division by zero")); }
+                    Value::Quantity(Quantity::new(if op == '*' { a.magnitude*b } else { a.magnitude/b }, a.dimension).map_err(|e| RuntimeError::new(self.line, e.to_string()))?)
+                }
+                (Value::Number(a), Value::Quantity(b)) if op == '*' => Value::Quantity(Quantity::new(a*b.magnitude, b.dimension).map_err(|e| RuntimeError::new(self.line, e.to_string()))?),
+                _ => return Err(RuntimeError::new(self.line, "incompatible expression operands")),
+            };
+        }
+        Ok(lhs)
+    }
+}
+
+fn eval_atom(expr: &str, vars: &HashMap<String, Value>, line: usize) -> Result<Value, RuntimeError> {
+    let tokens = expression_tokens(expr, line)?;
+    ExpressionParser { tokens, position: 0, variables: vars, line }.parse()
 }
 
 fn as_quantity(value: Value, default_unit: &str, line: usize, label: &str) -> Result<Quantity, RuntimeError> {
@@ -297,5 +398,17 @@ show spike_times
     fn rejects_unknown_neuron_parameter() {
         let source = "neuron \"x\":\n    magic_parameter = 1 ms\n";
         assert!(run_source(source).unwrap_err().message.contains("unknown neuron parameter"));
+    }
+}
+
+
+#[cfg(test)]
+mod expression_tests {
+    use super::*;
+    #[test]
+    fn evaluates_arithmetic_with_units_and_precedence() {
+        let vars = HashMap::new();
+        let value = eval_atom("20 ms * 2 + 5 ms", &vars, 1).unwrap();
+        match value { Value::Quantity(q) => assert_eq!(q.magnitude, 45.0), _ => panic!("expected quantity") }
     }
 }
