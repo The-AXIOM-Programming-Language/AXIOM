@@ -192,30 +192,22 @@ fn set_parameter(params: &mut LifParameters, key: &str, value: Quantity, line: u
     Ok(())
 }
 
-fn csv_escape(value: &str) -> String {
-    if value.contains(',') || value.contains('"') || value.contains('\n') {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    } else { value.to_string() }
-}
-
 pub fn check_source(source: &str) -> Result<(), RuntimeError> {
     let lines: Vec<&str> = source.lines().collect();
     let mut in_neuron = false;
-    let mut has_parameter = false;
     for (i, raw) in lines.iter().enumerate() {
         let line_no = i + 1;
         let clean = raw.split('#').next().unwrap_or("").trim();
         if clean.is_empty() { continue; }
         if clean.starts_with("neuron ") {
             if !clean.ends_with(':') { return Err(RuntimeError::new(line_no, "neuron declaration must end with ':'")); }
-            in_neuron = true; has_parameter = false; continue;
+            in_neuron = true; continue;
         }
         if in_neuron && (raw.starts_with(' ') || raw.starts_with('\t')) {
             let Some((key, value)) = clean.split_once('=') else {
                 return Err(RuntimeError::new(line_no, "neuron properties use 'name = value'"));
             };
             if key.trim().is_empty() || value.trim().is_empty() { return Err(RuntimeError::new(line_no, "invalid neuron parameter assignment")); }
-            has_parameter = true;
             continue;
         }
         in_neuron = false;
@@ -226,7 +218,6 @@ pub fn check_source(source: &str) -> Result<(), RuntimeError> {
         }
         return Err(RuntimeError::new(line_no, format!("unknown statement '{clean}'")));
     }
-    let _ = has_parameter;
     Ok(())
 }
 
