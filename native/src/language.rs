@@ -196,8 +196,29 @@ pub fn run_source(source: &str) -> Result<Vec<String>, RuntimeError> {
                     start_time: as_quantity(eval_atom(start, &vars, line_no)?, "ms", line_no, "start time")?,
                     duration: Some(as_quantity(eval_atom(duration, &vars, line_no)?, "ms", line_no, "duration")?),
                 };
+            } else if let Some(expr) = rest.strip_prefix("pulse train current ") {
+                let (amplitude, tail) = expr.split_once(" starting at ").ok_or_else(|| RuntimeError::new(line_no, "pulse train syntax requires 'starting at'"))?;
+                let (start, tail) = tail.split_once(" pulse_duration ").ok_or_else(|| RuntimeError::new(line_no, "pulse train syntax requires 'pulse_duration'"))?;
+                let (width, tail) = tail.split_once(" frequency ").ok_or_else(|| RuntimeError::new(line_no, "pulse train syntax requires 'frequency'"))?;
+                let (frequency, count) = tail.split_once(" pulses ").ok_or_else(|| RuntimeError::new(line_no, "pulse train syntax requires 'pulses'"))?;
+                let count_value = eval_atom(count, &vars, line_no)?;
+                let count_number = match count_value {
+                    Value::Number(n) => n,
+                    Value::Quantity(q) if q.dimension == Dimension::DIMENSIONLESS => q.magnitude,
+                    _ => return Err(RuntimeError::new(line_no, "pulse count must be an integer")),
+                };
+                if count_number < 1.0 || count_number.fract() != 0.0 || count_number > usize::MAX as f64 {
+                    return Err(RuntimeError::new(line_no, "pulse count must be a positive integer"));
+                }
+                stimulus = Stimulus::PulseTrain {
+                    amplitude: as_quantity(eval_atom(amplitude, &vars, line_no)?, "nA", line_no, "amplitude")?,
+                    start_time: as_quantity(eval_atom(start, &vars, line_no)?, "ms", line_no, "start time")?,
+                    pulse_duration: as_quantity(eval_atom(width, &vars, line_no)?, "ms", line_no, "pulse duration")?,
+                    frequency: as_quantity(eval_atom(frequency, &vars, line_no)?, "Hz", line_no, "frequency")?,
+                    num_pulses: count_number as usize,
+                };
             } else {
-                return Err(RuntimeError::new(line_no, "supported forms: inject current ...; inject step current ..."));
+                return Err(RuntimeError::new(line_no, "supported forms: inject current ..., inject step current ..., inject pulse train current ..."));
             }
         } else if let Some(rest) = clean.strip_prefix("simulate") {
             let mut duration = Quantity::from_unit(100.0, Unit::lookup("ms").unwrap()).unwrap();
@@ -238,4 +259,43 @@ pub fn run_source(source: &str) -> Result<Vec<String>, RuntimeError> {
         i += 1;
     }
     Ok(output)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn executes_the_original_first_neuron_program_shape() {
+        let source = r#"neuron "Example Neuron":
+    membrane_time = 20 ms
+    resting_voltage = -65 mV
+    spike_threshold = -50 mV
+    reset_voltage = -65 mV
+    input_resistance = 10 MOhm
+    initial_voltage = -65 mV
+
+inject current 2 nA
+simulate for 100 ms using time_step 0.1 ms using solver rk4
+show spike_count
+show spike_times
+"#;
+        let output = run_source(source).unwrap();
+        assert_eq!(output.len(), 2);
+        assert!(output[0].parse::<usize>().unwrap() > 0);
+        assert!(output[1].starts_with('['));
+    }
+
+    #[test]
+    fn accepts_pulse_train_stimulus() {
+        let source = "inject pulse train current 2 nA starting at 0 ms pulse_duration 1 ms frequency 10 Hz pulses 5\nsimulate for 500 ms using time_step 0.1 ms using solver rk4\nshow spike_count\n";
+        assert!(run_source(source).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_neuron_parameter() {
+        let source = "neuron \"x\":\n    magic_parameter = 1 ms\n";
+        assert!(run_source(source).unwrap_err().message.contains("unknown neuron parameter"));
+    }
 }
