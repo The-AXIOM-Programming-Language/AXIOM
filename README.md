@@ -27,10 +27,18 @@ cargo build --release
 
 ### Run a program
 
+From the `native/` directory:
+
 ```sh
 cargo run -- run examples/hello.ax
-cargo run -- check examples/hello.ax\ncargo run -- check ../examples/first_neuron.ax\ncargo run -- run ../examples/first_neuron.ax\ncargo run -- run ../examples/pulse_train_neuron.ax
-cargo run -- --version\ncargo run -- help\ncargo run -- doctor\ncargo run -- new my_experiment
+cargo run -- check examples/hello.ax
+cargo run -- check ../examples/first_neuron.ax
+cargo run -- run ../examples/first_neuron.ax
+cargo run -- run ../examples/pulse_train_neuron.ax
+cargo run -- --version
+cargo run -- help
+cargo run -- doctor
+cargo run -- new my_experiment
 ```
 
 After building, the executable is located at `native/target/release/axiom` (Windows: `axiom.exe`).
