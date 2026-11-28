@@ -136,6 +136,7 @@ impl LifParameters {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(non_snake_case)] // Unit suffixes are intentionally explicit in the public result API.
 pub struct LifResult {
     pub times_ms: Vec<f64>,
     pub membrane_voltage_mV: Vec<f64>,

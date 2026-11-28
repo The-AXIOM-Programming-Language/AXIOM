@@ -3,11 +3,13 @@ name: Native AXIOM
 on:
   push:
     paths:
-      - "native/**"\n      - "examples/**"
+      - "native/**"
+      - "examples/**"
       - ".github/workflows/native.yml"
   pull_request:
     paths:
       - "native/**"
+      - "examples/**"
       - ".github/workflows/native.yml"
   workflow_dispatch:
 
@@ -23,6 +25,14 @@ jobs:
       - name: Build release executable
         working-directory: native
         run: cargo build --release --locked
-      - name: Run example program
+      - name: Exercise CLI and original neuroscience examples
         working-directory: native
-        run: |\n          cargo run --locked -- --version\n          cargo run --locked -- --help\n          cargo run --locked -- check examples/hello.ax\n          cargo run --locked -- run examples/hello.ax\n          cargo run --locked -- check ../examples/first_neuron.ax\n          cargo run --locked -- run ../examples/first_neuron.ax\n          cargo run --locked -- check ../examples/pulse_train_neuron.ax\n          cargo run --locked -- run ../examples/pulse_train_neuron.ax
+        run: |
+          cargo run --locked -- --version
+          cargo run --locked -- --help
+          cargo run --locked -- check examples/hello.ax
+          cargo run --locked -- run examples/hello.ax
+          cargo run --locked -- check ../examples/first_neuron.ax
+          cargo run --locked -- run ../examples/first_neuron.ax
+          cargo run --locked -- check ../examples/pulse_train_neuron.ax
+          cargo run --locked -- run ../examples/pulse_train_neuron.ax
